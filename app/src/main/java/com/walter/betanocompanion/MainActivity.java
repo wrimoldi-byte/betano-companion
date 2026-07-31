@@ -1,6 +1,7 @@
 package com.walter.betanocompanion;
 
 import android.content.*;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -19,12 +20,18 @@ public class MainActivity extends android.app.Activity {
     box.addView(title("Betano Companion")); TextView note=new TextView(this); note.setText("Registro personal. El RTP no predice el próximo giro ni garantiza ganancia.");note.setTextSize(15);box.addView(note);
     game=input("Juego (ej.: Book of Dead)","game"); rtp=input("RTP publicado % (ej.: 96.2)","rtp"); volatility=input("Volatilidad: baja / media / alta","vol"); bankroll=input("Saldo de sesión $","bank"); wager=input("Total apostado $","wager");
     box.addView(game);box.addView(rtp);box.addView(volatility);box.addView(bankroll);box.addView(wager);
-    Button save=button("Guardar y analizar"); Button overlay=button("Activar burbuja flotante"); Button stop=button("Ocultar burbuja"); box.addView(save);box.addView(overlay);box.addView(stop);
+    Button save=button("Guardar y analizar"); Button scan=button("Activar lectura de pantalla"); Button overlay=button("Activar burbuja flotante"); Button stop=button("Ocultar burbuja"); box.addView(save);box.addView(scan);box.addView(overlay);box.addView(stop);
     result=new TextView(this);result.setTextSize(16);result.setPadding(0,pad,0,0);box.addView(result); analyze();
-    save.setOnClickListener(v->{ save(); analyze(); }); overlay.setOnClickListener(v->startOverlay()); stop.setOnClickListener(v->stopService(new Intent(this,OverlayService.class)));
+    save.setOnClickListener(v->{ save(); analyze(); }); scan.setOnClickListener(v->requestScreenRead()); overlay.setOnClickListener(v->startOverlay()); stop.setOnClickListener(v->stopService(new Intent(this,OverlayService.class)));
   }
   void save(){ prefs.edit().putString("game",game.getText().toString()).putString("rtp",rtp.getText().toString()).putString("vol",volatility.getText().toString()).putString("bank",bankroll.getText().toString()).putString("wager",wager.getText().toString()).apply(); }
   void analyze(){ try { double value=Double.parseDouble(rtp.getText().toString().replace(',','.')); String msg=value>=96?"RTP alto dentro de lo publicado.":"RTP por debajo de 96%."; msg+="\nNo significa que vaya a pagar ahora. Usá un límite y frená al alcanzarlo."; result.setText(msg); } catch(Exception e){result.setText("Cargá el RTP publicado para ver una referencia. No uses estimaciones de ‘racha’.");} }
   void startOverlay(){ save(); if(!Settings.canDrawOverlays(this)){ Intent i=new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:"+getPackageName()));startActivity(i);Toast.makeText(this,"Habilitá el permiso y tocá de nuevo Activar",Toast.LENGTH_LONG).show();return;} startService(new Intent(this,OverlayService.class)); }
+  void requestScreenRead(){
+    Toast.makeText(this,"Android te pedirá permiso. Después abrí Betano y tocá LEER en la burbuja.",Toast.LENGTH_LONG).show();
+    MediaProjectionManager m=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
+    startActivityForResult(m.createScreenCaptureIntent(),900);
+  }
+  @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){ super.onActivityResult(requestCode,resultCode,data); if(requestCode==900 && resultCode==RESULT_OK && data!=null){ Intent i=new Intent(this,ScreenScanService.class);i.putExtra("resultCode",resultCode);i.putExtra("data",data);startForegroundService(i);Toast.makeText(this,"Lectura activa. La burbuja mostrará LEER.",Toast.LENGTH_LONG).show(); } }
   int dp(int n){return (int)(n*getResources().getDisplayMetrics().density);}
 }

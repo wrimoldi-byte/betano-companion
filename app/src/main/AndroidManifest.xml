@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <application android:allowBackup="true" android:label="Betano Companion" android:theme="@style/AppTheme" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -8,5 +10,6 @@
             </intent-filter>
         </activity>
         <service android:name=".OverlayService" android:exported="false" />
+        <service android:name=".ScreenScanService" android:exported="false" android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

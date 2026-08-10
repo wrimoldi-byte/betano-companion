@@ -40,12 +40,15 @@ public class GptRecommendationClient {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
-                if (code < 200 || code >= 300) throw new RuntimeException("HTTP " + code + ": " + sb);
+                if (code < 200 || code >= 300) {
+                    finish(context, cb, "OCR completo. La IA del servidor está bloqueada; falta habilitar AI Gateway en Vercel.");
+                    return;
+                }
                 JSONObject out = new JSONObject(sb.toString());
                 String result = out.optString("recommendation", "Sin recomendación");
                 finish(context, cb, result);
             } catch (Exception e) {
-                finish(context, cb, "GPT no disponible. OCR realizado correctamente.");
+                finish(context, cb, "OCR completo. No se pudo conectar con la IA.");
             }
         }).start();
     }

@@ -16,18 +16,28 @@ import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 import java.nio.ByteBuffer;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenScanService extends Service {
     public static final String ACTION_START = "com.walter.betanocompanion.START_CAPTURE_SESSION";
     public static final String ACTION_CAPTURE = "com.walter.betanocompanion.CAPTURE_NOW";
 
+    private static final int TOTAL_SAMPLES = 7;
+    private static final long BETWEEN_SAMPLES_MS = 900;
+
     private MediaProjection projection;
     private ImageReader reader;
     private VirtualDisplay display;
     private int w, h, density;
+
     private final AtomicBoolean pendingCapture = new AtomicBoolean(false);
-    private final AtomicBoolean analyzing = new AtomicBoolean(false);
+    private final AtomicBoolean ocrBusy = new AtomicBoolean(false);
+    private final AtomicBoolean scanRunning = new AtomicBoolean(false);
+    private final Set<String> collectedLines = new LinkedHashSet<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private int sampleNumber = 0;
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -40,11 +50,10 @@ public class ScreenScanService extends Service {
         } else if (ACTION_CAPTURE.equals(action)) {
             if (projection == null || reader == null) {
                 setStatus("Lectura inactiva. Abrí Betano Companion y tocá ACTIVAR LECTURA.");
-            } else if (analyzing.get()) {
-                setStatus("Ya estoy analizando…");
+            } else if (scanRunning.get()) {
+                setStatus("Ya estoy leyendo. Seguí bajando por la pantalla…");
             } else {
-                pendingCapture.set(true);
-                setStatus("Leyendo pantalla…");
+                startScrollingScan();
             }
         }
         return START_STICKY;
@@ -67,7 +76,7 @@ public class ScreenScanService extends Service {
                 setStatus("Lectura detenida. Volvé a activar desde la app.");
                 cleanup();
             }
-        }, new Handler(Looper.getMainLooper()));
+        }, mainHandler);
 
         android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
         ((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
@@ -82,17 +91,18 @@ public class ScreenScanService extends Service {
                 image = r.acquireLatestImage();
                 if (image == null) return;
                 if (!pendingCapture.compareAndSet(true, false)) return;
-                if (!analyzing.compareAndSet(false, true)) return;
+                if (!ocrBusy.compareAndSet(false, true)) return;
 
                 Bitmap bitmap = toBitmap(image);
-                runOcr(bitmap);
+                runOcrSample(bitmap);
             } catch (Exception e) {
-                analyzing.set(false);
+                ocrBusy.set(false);
                 setStatus("No se pudo leer la pantalla");
+                scanRunning.set(false);
             } finally {
                 if (image != null) image.close();
             }
-        }, new Handler(Looper.getMainLooper()));
+        }, mainHandler);
 
         display = projection.createVirtualDisplay(
                 "BCPersistentScan",
@@ -108,26 +118,78 @@ public class ScreenScanService extends Service {
         setStatus("Listo. Abrí Betano y tocá LEER.");
     }
 
-    private void runOcr(Bitmap bitmap) {
+    private void startScrollingScan() {
+        collectedLines.clear();
+        sampleNumber = 0;
+        scanRunning.set(true);
+        ocrBusy.set(false);
+        setStatus("Deslizá hacia abajo… iniciando lectura");
+        requestNextSample(250);
+    }
+
+    private void requestNextSample(long delayMs) {
+        mainHandler.postDelayed(() -> {
+            if (!scanRunning.get()) return;
+            pendingCapture.set(true);
+            setStatus("Deslizá hacia abajo… " + (sampleNumber + 1) + "/" + TOTAL_SAMPLES);
+        }, delayMs);
+    }
+
+    private void runOcrSample(Bitmap bitmap) {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 .process(InputImage.fromBitmap(bitmap, 0))
                 .addOnSuccessListener(result -> {
                     String text = result.getText() == null ? "" : result.getText().trim();
                     bitmap.recycle();
-                    getSharedPreferences("session", MODE_PRIVATE).edit().putString("last_scan", text).apply();
-                    if (text.isEmpty()) {
-                        analyzing.set(false);
-                        setStatus("No se detectó texto visible");
-                        return;
+                    addUniqueLines(text);
+                    sampleNumber++;
+                    ocrBusy.set(false);
+
+                    if (sampleNumber >= TOTAL_SAMPLES) {
+                        finishScrollingScan();
+                    } else {
+                        requestNextSample(BETWEEN_SAMPLES_MS);
                     }
-                    setStatus("Analizando con IA…");
-                    GptRecommendationClient.analyze(this, text, r -> analyzing.set(false));
                 })
                 .addOnFailureListener(e -> {
                     bitmap.recycle();
-                    analyzing.set(false);
-                    setStatus("Falló el OCR");
+                    sampleNumber++;
+                    ocrBusy.set(false);
+                    if (sampleNumber >= TOTAL_SAMPLES) finishScrollingScan();
+                    else requestNextSample(BETWEEN_SAMPLES_MS);
                 });
+    }
+
+    private void addUniqueLines(String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        for (String raw : text.split("\\r?\\n")) {
+            String line = raw.trim();
+            if (line.length() >= 2) collectedLines.add(line);
+            if (collectedLines.size() >= 350) break;
+        }
+    }
+
+    private void finishScrollingScan() {
+        scanRunning.set(false);
+        pendingCapture.set(false);
+        ocrBusy.set(false);
+
+        StringBuilder all = new StringBuilder();
+        for (String line : collectedLines) {
+            if (all.length() > 0) all.append('\n');
+            all.append(line);
+            if (all.length() > 11000) break;
+        }
+        String text = all.toString().trim();
+        getSharedPreferences("session", MODE_PRIVATE).edit().putString("last_scan", text).apply();
+
+        if (text.isEmpty()) {
+            setStatus("No se detectó texto durante el recorrido");
+            return;
+        }
+
+        setStatus("Lectura completa. Analizando con IA…");
+        GptRecommendationClient.analyze(this, text, r -> {});
     }
 
     private void createNotification() {
@@ -174,7 +236,8 @@ public class ScreenScanService extends Service {
         reader = null;
         projection = null;
         pendingCapture.set(false);
-        analyzing.set(false);
+        ocrBusy.set(false);
+        scanRunning.set(false);
         stopForeground(true);
         stopSelf();
     }

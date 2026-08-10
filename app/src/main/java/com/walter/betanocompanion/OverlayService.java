@@ -47,12 +47,10 @@ public class OverlayService extends Service {
         read.setText("LEER");
         read.setAllCaps(true);
         read.setOnClickListener(v -> {
-            getSharedPreferences("session", MODE_PRIVATE).edit().putString("status", "Preparando lectura…").apply();
+            getSharedPreferences("session", MODE_PRIVATE).edit().putString("status", "Leyendo…").apply();
             refreshLabel();
-            Intent i = new Intent(this, MainActivity.class);
-            i.putExtra("request_capture", true);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            startActivity(i);
+            Intent scan = new Intent(this, ScreenScanService.class).setAction(ScreenScanService.ACTION_CAPTURE);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(scan); else startService(scan);
         });
         panel.addView(read, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)));
 
@@ -91,7 +89,7 @@ public class OverlayService extends Service {
 
     private void refreshLabel() {
         if (label == null) return;
-        String s = getSharedPreferences("session", MODE_PRIVATE).getString("status", "BC v2.1");
+        String s = getSharedPreferences("session", MODE_PRIVATE).getString("status", "BC v2.4");
         if (s.length() > 90) s = s.substring(0, 90) + "…";
         label.setText(s);
     }

@@ -21,6 +21,11 @@ public class OverlayService extends Service {
     if(bubble!=null) return START_NOT_STICKY;
     wm=(WindowManager)getSystemService(WINDOW_SERVICE);
 
+    // Limpia mensajes de error guardados por versiones anteriores.
+    SharedPreferences prefs=getSharedPreferences("session",MODE_PRIVATE);
+    String oldSummary=prefs.getString("analysis_summary","");
+    if(isLegacyServerError(oldSummary)) prefs.edit().remove("analysis_summary").apply();
+
     LinearLayout panel=new LinearLayout(this);
     panel.setOrientation(LinearLayout.VERTICAL);
     panel.setPadding(dp(10),dp(8),dp(8),dp(8));
@@ -74,10 +79,24 @@ public class OverlayService extends Service {
     return START_NOT_STICKY;
   }
 
+  boolean isLegacyServerError(String s){
+    if(s==null)return false;
+    String low=s.toLowerCase();
+    return low.contains("ai gateway") ||
+           low.contains("ia del servidor") ||
+           low.contains("gateway en vercel") ||
+           low.contains("servidor está bloqueada") ||
+           low.contains("servidor esta bloqueada");
+  }
+
   void refresh(){
     if(info==null)return;
     SharedPreferences p=getSharedPreferences("session",MODE_PRIVATE);
     String summary=p.getString("analysis_summary","");
+    if(isLegacyServerError(summary)){
+      p.edit().remove("analysis_summary").apply();
+      summary="";
+    }
     if(summary.isEmpty()){
       String g=p.getString("game","Sin juego");String r=p.getString("rtp","—");
       info.setText("✦ "+g+"\nRTP: "+r+"%");

@@ -13,14 +13,13 @@ import java.net.URL;
 public class GptRecommendationClient {
     public interface Callback { void done(String result); }
 
+    private static final String DEFAULT_ENDPOINT = "https://betano-companion-api.vercel.app/api/recommend";
+
     public static void analyze(Context context, String screenText, Callback cb) {
         new Thread(() -> {
             String endpoint = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                    .getString("gpt_endpoint", "").trim();
-            if (endpoint.isEmpty()) {
-                finish(context, cb, "OCR listo. Falta configurar el endpoint GPT seguro.");
-                return;
-            }
+                    .getString("gpt_endpoint", DEFAULT_ENDPOINT).trim();
+            if (endpoint.isEmpty()) endpoint = DEFAULT_ENDPOINT;
             try {
                 URL url = new URL(endpoint);
                 HttpURLConnection c = (HttpURLConnection) url.openConnection();
@@ -30,7 +29,7 @@ public class GptRecommendationClient {
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 c.setDoOutput(true);
                 JSONObject body = new JSONObject();
-                body.put("screen_text", screenText);
+                body.put("text", screenText);
                 try (OutputStream os = c.getOutputStream()) {
                     os.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
@@ -41,7 +40,7 @@ public class GptRecommendationClient {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
-                if (code < 200 || code >= 300) throw new RuntimeException("HTTP " + code);
+                if (code < 200 || code >= 300) throw new RuntimeException("HTTP " + code + ": " + sb);
                 JSONObject out = new JSONObject(sb.toString());
                 String result = out.optString("recommendation", "Sin recomendación");
                 finish(context, cb, result);

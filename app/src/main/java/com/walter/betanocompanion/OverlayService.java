@@ -43,7 +43,7 @@ public class OverlayService extends Service {
         panel.setBackgroundColor(0xE6222222);
 
         TextView title = new TextView(this);
-        title.setText("🎰 BC 2.0");
+        title.setText("🎰 BC 2.2");
         title.setTextColor(0xFFFFFFFF);
         title.setTextSize(16f);
         panel.addView(title);
@@ -104,9 +104,29 @@ public class OverlayService extends Service {
         if (stats == null) return;
         SessionStore.Snapshot s = SessionStore.get().snapshot();
         stats.setText(String.format(Locale.US,
-                "Tiradas: %d\nApostado: %.2f\nGanado: %.2f\nRTP sesión: %.1f%%\nSin premio: %d",
-                s.spins(), s.wagered(), s.won(), s.rtp(), s.noWinStreak()));
-        trend.setText(s.trend() + "\nIndicador: " + s.score() + "/100\n(señal histórica, no predicción)");
+                "Tiradas: %d\nApostado: %.2f\nGanado: %.2f\nRTP sesión: %.1f%%\n" +
+                "Sin premio (total): %d\nRacha actual sin premio: %d\nPremios detectados: %d\nFrecuencia de premio: %.1f%%",
+                s.spins(), s.wagered(), s.won(), s.rtp(),
+                s.totalNoWinSpins(), s.noWinStreak(), s.totalHits(), s.hitRate()));
+
+        String windowText;
+        if (s.windowMin() > 0) {
+            if (s.windowMin() == s.windowMax()) {
+                windowText = "Zona histórica observada: ~" + s.windowMin() + " tirada(s)";
+            } else {
+                windowText = "Zona histórica observada: " + s.windowMin() + "–" + s.windowMax() + " tiradas";
+            }
+        } else {
+            windowText = "Zona histórica: faltan datos";
+        }
+
+        String avg = s.avgSpinsPerHit() > 0
+                ? String.format(Locale.US, "Promedio: 1 premio cada %.1f tiradas", s.avgSpinsPerHit())
+                : "Promedio: faltan premios detectados";
+
+        trend.setText(s.trend() + "\n" + avg + "\n" + windowText +
+                "\nIndicador: " + s.score() + "/100" +
+                "\n(historial de esta sesión, no predice el próximo giro)");
     }
 
     @Override public void onDestroy() {

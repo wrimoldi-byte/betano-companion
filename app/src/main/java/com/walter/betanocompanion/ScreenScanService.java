@@ -1,5 +1,6 @@
 package com.walter.betanocompanion;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -57,11 +58,17 @@ public class ScreenScanService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
-        int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1);
+        int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED);
         Intent data;
         if (Build.VERSION.SDK_INT >= 33) data = intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent.class);
         else data = intent.getParcelableExtra(EXTRA_RESULT_DATA);
-        if (resultCode == -1 || data == null) { stopSelf(); return START_NOT_STICKY; }
+
+        // Activity.RESULT_OK is -1. The previous build mistakenly treated -1 as an error,
+        // so the screen reader stopped immediately after permission was granted.
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
 
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         projection = mpm.getMediaProjection(resultCode, data);
@@ -86,7 +93,7 @@ public class ScreenScanService extends Service {
         Image image = reader.acquireLatestImage();
         if (image == null) return;
         long now = System.currentTimeMillis();
-        if (now - lastProcess < 900) { image.close(); return; }
+        if (now - lastProcess < 700) { image.close(); return; }
         lastProcess = now;
         Bitmap bmp = null;
         try {
@@ -117,7 +124,7 @@ public class ScreenScanService extends Service {
         String text = raw.toUpperCase(Locale.ROOT).replace('\u00A0', ' ');
 
         Double bet = findAmount(text, "APUESTA", "BET", "STAKE");
-        Double balance = findAmount(text, "SALDO", "BALANCE", "CREDIT", "CRÉDITO", "CREDITO");
+        Double balance = findAmount(text, "CRÉDITO", "CREDITO", "SALDO", "BALANCE", "CREDIT");
         if (bet != null && bet > 0) lastBet = bet;
         if (balance == null || lastBet <= 0) return;
 
@@ -128,7 +135,7 @@ public class ScreenScanService extends Service {
 
         double delta = balance - lastBalance;
         long now = System.currentTimeMillis();
-        if (Math.abs(delta) >= 0.005 && now - lastSpinAt >= 700) {
+        if (Math.abs(delta) >= 0.005 && now - lastSpinAt >= 600) {
             double prize = Math.max(0, delta + lastBet);
             SessionStore.get().addSpin(lastBet, prize);
             lastSpinAt = now;
@@ -140,7 +147,7 @@ public class ScreenScanService extends Service {
         for (String label : labels) {
             int idx = text.indexOf(label);
             if (idx < 0) continue;
-            String tail = text.substring(idx + label.length(), Math.min(text.length(), idx + label.length() + 35));
+            String tail = text.substring(idx + label.length(), Math.min(text.length(), idx + label.length() + 45));
             Matcher m = MONEY.matcher(tail);
             if (m.find()) {
                 Double value = parseMoney(m.group(1));
@@ -170,7 +177,7 @@ public class ScreenScanService extends Service {
         }
         return new Notification.Builder(this, CHANNEL)
                 .setContentTitle("Betano Companion")
-                .setContentText("Analizando sesión en pantalla")
+                .setContentText("Lector de pantalla activo")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();

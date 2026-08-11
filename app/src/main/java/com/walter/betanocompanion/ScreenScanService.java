@@ -63,8 +63,6 @@ public class ScreenScanService extends Service {
         if (Build.VERSION.SDK_INT >= 33) data = intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent.class);
         else data = intent.getParcelableExtra(EXTRA_RESULT_DATA);
 
-        // Activity.RESULT_OK is -1. The previous build mistakenly treated -1 as an error,
-        // so the screen reader stopped immediately after permission was granted.
         if (resultCode != Activity.RESULT_OK || data == null) {
             stopSelf();
             return START_NOT_STICKY;
@@ -123,6 +121,10 @@ public class ScreenScanService extends Service {
         if (raw == null || raw.isBlank()) return;
         String text = raw.toUpperCase(Locale.ROOT).replace('\u00A0', ' ');
 
+        boolean bonusMode = containsAny(text,
+                "TIRADAS GRATIS", "FREE SPINS", "FREESPINS",
+                "JOGADAS GRATIS", "RODADAS GRATIS", "BONUS ACTIVE");
+
         Double bet = findAmount(text, "APUESTA", "BET", "STAKE");
         Double balance = findAmount(text, "CRÉDITO", "CREDITO", "SALDO", "BALANCE", "CREDIT");
         if (bet != null && bet > 0) lastBet = bet;
@@ -135,12 +137,61 @@ public class ScreenScanService extends Service {
 
         double delta = balance - lastBalance;
         long now = System.currentTimeMillis();
-        if (Math.abs(delta) >= 0.005 && now - lastSpinAt >= 600) {
-            double prize = Math.max(0, delta + lastBet);
-            SessionStore.get().addSpin(lastBet, prize);
-            lastSpinAt = now;
+        if (Math.abs(delta) < minimumMovement(lastBet)) return;
+        if (now - lastSpinAt < 600) return;
+
+        if (bonusMode) {
             lastBalance = balance;
+            lastSpinAt = now;
+            return;
         }
+
+        Double prize = classifyPrize(delta, lastBet);
+        if (prize == null) {
+            lastBalance = balance;
+            return;
+        }
+
+        SessionStore.get().addSpin(lastBet, prize);
+        lastSpinAt = now;
+        lastBalance = balance;
+    }
+
+    private boolean containsAny(String text, String... probes) {
+        for (String probe : probes) if (text.contains(probe)) return true;
+        return false;
+    }
+
+    private double minimumMovement(double bet) {
+        return Math.max(0.50, bet * 0.08);
+    }
+
+    private Double classifyPrize(double delta, double bet) {
+        double tolerance = Math.max(1.0, bet * 0.12);
+        double expectedLoss = -bet;
+
+        // Una caída cercana al valor de la apuesta es una tirada sin premio.
+        if (Math.abs(delta - expectedLoss) <= tolerance) {
+            return 0.0;
+        }
+
+        // Saltos negativos imposibles o lecturas muy desviadas del OCR se ignoran.
+        if (delta < expectedLoss - (tolerance * 2.5)) {
+            return null;
+        }
+
+        double prize = delta + bet;
+        if (prize <= tolerance) {
+            return 0.0;
+        }
+
+        // Si el saldo igualmente terminó bajando y el supuesto premio es mínimo,
+        // preferimos clasificarlo como pérdida para evitar falsos positivos del OCR.
+        if (delta < 0 && prize < Math.max(tolerance * 2.0, bet * 0.25)) {
+            return 0.0;
+        }
+
+        return Math.max(0.0, prize);
     }
 
     private Double findAmount(String text, String... labels) {

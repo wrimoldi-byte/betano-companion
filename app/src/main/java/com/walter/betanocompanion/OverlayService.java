@@ -43,7 +43,7 @@ public class OverlayService extends Service {
         panel.setBackgroundColor(0xE6222222);
 
         TextView title = new TextView(this);
-        title.setText("🎰 BC 2.3");
+        title.setText("🎰 BC 2.4");
         title.setTextColor(0xFFFFFFFF);
         title.setTextSize(16f);
         panel.addView(title);

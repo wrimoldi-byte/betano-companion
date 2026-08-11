@@ -1,37 +1,106 @@
 package com.walter.betanocompanion;
 
-import android.content.*;
+import android.app.Activity;
+import android.content.Intent;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.graphics.Color;
-import android.view.*;
-import android.widget.*;
+import android.view.Gravity;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
 
-public class MainActivity extends android.app.Activity {
-  EditText game, rtp, volatility, bankroll, wager; TextView result; SharedPreferences prefs;
-  int pad;
-  @Override public void onCreate(Bundle state) { super.onCreate(state); prefs=getSharedPreferences("session",MODE_PRIVATE); pad=dp(16); build(); }
-  TextView title(String s){ TextView t=new TextView(this); t.setText(s);t.setTextSize(22);t.setTextColor(Color.rgb(20,35,60));t.setPadding(0,0,0,dp(8));return t; }
-  EditText input(String hint,String key){ EditText e=new EditText(this);e.setHint(hint);e.setText(prefs.getString(key,""));e.setTextSize(16);e.setPadding(pad,dp(10),pad,dp(10));return e; }
-  Button button(String s){ Button b=new Button(this);b.setText(s);return b; }
-  void build(){ ScrollView sv=new ScrollView(this); LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);box.setPadding(pad,dp(28),pad,pad);sv.addView(box); setContentView(sv);
-    box.addView(title("Betano Companion")); TextView note=new TextView(this); note.setText("Registro personal. El RTP no predice el próximo giro ni garantiza ganancia.");note.setTextSize(15);box.addView(note);
-    game=input("Juego (ej.: Book of Dead)","game"); rtp=input("RTP publicado % (ej.: 96.2)","rtp"); volatility=input("Volatilidad: baja / media / alta","vol"); bankroll=input("Saldo de sesión $","bank"); wager=input("Total apostado $","wager");
-    box.addView(game);box.addView(rtp);box.addView(volatility);box.addView(bankroll);box.addView(wager);
-    Button save=button("Guardar y analizar"); Button scan=button("Activar lectura de pantalla"); Button overlay=button("Activar burbuja flotante"); Button stop=button("Ocultar burbuja"); box.addView(save);box.addView(scan);box.addView(overlay);box.addView(stop);
-    result=new TextView(this);result.setTextSize(16);result.setPadding(0,pad,0,0);box.addView(result); analyze();
-    save.setOnClickListener(v->{ save(); analyze(); }); scan.setOnClickListener(v->requestScreenRead()); overlay.setOnClickListener(v->startOverlay()); stop.setOnClickListener(v->stopService(new Intent(this,OverlayService.class)));
-  }
-  void save(){ prefs.edit().putString("game",game.getText().toString()).putString("rtp",rtp.getText().toString()).putString("vol",volatility.getText().toString()).putString("bank",bankroll.getText().toString()).putString("wager",wager.getText().toString()).apply(); }
-  void analyze(){ try { double value=Double.parseDouble(rtp.getText().toString().replace(',','.')); String msg=value>=96?"RTP alto dentro de lo publicado.":"RTP por debajo de 96%."; msg+="\nNo significa que vaya a pagar ahora. Usá un límite y frená al alcanzarlo."; result.setText(msg); } catch(Exception e){result.setText("Cargá el RTP publicado para ver una referencia. No uses estimaciones de ‘racha’.");} }
-  void startOverlay(){ save(); if(!Settings.canDrawOverlays(this)){ Intent i=new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:"+getPackageName()));startActivity(i);Toast.makeText(this,"Habilitá el permiso y tocá de nuevo Activar",Toast.LENGTH_LONG).show();return;} startService(new Intent(this,OverlayService.class)); }
-  void requestScreenRead(){
-    Toast.makeText(this,"Android te pedirá permiso. Después abrí Betano y tocá LEER en la burbuja.",Toast.LENGTH_LONG).show();
-    MediaProjectionManager m=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
-    startActivityForResult(m.createScreenCaptureIntent(),900);
-  }
-  @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){ super.onActivityResult(requestCode,resultCode,data); if(requestCode==900 && resultCode==RESULT_OK && data!=null){ Intent i=new Intent(this,ScreenScanService.class);i.putExtra("resultCode",resultCode);i.putExtra("data",data);startForegroundService(i);Toast.makeText(this,"Lectura activa. La burbuja mostrará LEER.",Toast.LENGTH_LONG).show(); } }
-  int dp(int n){return (int)(n*getResources().getDisplayMetrics().density);}
+public class MainActivity extends Activity {
+    private static final int REQ_OVERLAY = 1201;
+    private static final int REQ_CAPTURE = 1202;
+    private MediaProjectionManager projectionManager;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        projectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(48, 56, 48, 48);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView title = new TextView(this);
+        title.setText("Betano Companion 2.0");
+        title.setTextSize(27f);
+        title.setGravity(Gravity.CENTER);
+        root.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView info = new TextView(this);
+        info.setText("Analizador de sesión\n\nLa app lee los importes visibles de la pantalla y calcula estadísticas de la sesión. El indicador de tendencia describe el historial reciente: no predice ni garantiza la próxima jugada.");
+        info.setTextSize(16f);
+        info.setPadding(0, 32, 0, 32);
+        root.addView(info, new LinearLayout.LayoutParams(-1, -2));
+
+        Button start = new Button(this);
+        start.setText("INICIAR ANÁLISIS");
+        start.setOnClickListener(v -> begin());
+        root.addView(start, new LinearLayout.LayoutParams(-1, -2));
+
+        Button bubbleOnly = new Button(this);
+        bubbleOnly.setText("MOSTRAR SOLO BURBUJA");
+        bubbleOnly.setOnClickListener(v -> ensureOverlayAndStartBubble());
+        root.addView(bubbleOnly, new LinearLayout.LayoutParams(-1, -2));
+
+        Button reset = new Button(this);
+        reset.setText("REINICIAR SESIÓN");
+        reset.setOnClickListener(v -> {
+            SessionStore.get().reset();
+            Toast.makeText(this, "Sesión reiniciada", Toast.LENGTH_SHORT).show();
+        });
+        root.addView(reset, new LinearLayout.LayoutParams(-1, -2));
+
+        setContentView(root);
+    }
+
+    private void begin() {
+        if (!Settings.canDrawOverlays(this)) {
+            Intent permission = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(permission, REQ_OVERLAY);
+            return;
+        }
+        startBubble();
+        startActivityForResult(projectionManager.createScreenCaptureIntent(), REQ_CAPTURE);
+    }
+
+    private void ensureOverlayAndStartBubble() {
+        if (!Settings.canDrawOverlays(this)) {
+            Intent permission = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(permission, REQ_OVERLAY);
+        } else {
+            startBubble();
+        }
+    }
+
+    private void startBubble() {
+        Intent overlay = new Intent(this, OverlayService.class);
+        startService(overlay);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_OVERLAY) {
+            if (Settings.canDrawOverlays(this)) begin();
+            else Toast.makeText(this, "La burbuja necesita permiso para mostrarse sobre otras apps", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (requestCode == REQ_CAPTURE && resultCode == RESULT_OK && data != null) {
+            Intent scan = new Intent(this, ScreenScanService.class);
+            scan.putExtra(ScreenScanService.EXTRA_RESULT_CODE, resultCode);
+            scan.putExtra(ScreenScanService.EXTRA_RESULT_DATA, data);
+            startForegroundService(scan);
+            Toast.makeText(this, "Análisis activo. Abrí el juego y dejá visible saldo/apuesta.", Toast.LENGTH_LONG).show();
+            moveTaskToBack(true);
+        }
+    }
 }

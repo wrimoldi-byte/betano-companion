@@ -107,7 +107,7 @@ public class ScreenScanService extends Service {
         if (bmp == null) return;
         final Bitmap frame = bmp;
         recognizer.process(InputImage.fromBitmap(frame, 0))
-                .addOnSuccessListener(worker::post, this::handleText)
+                .addOnSuccessListener(result -> worker.post(() -> handleText(result)))
                 .addOnCompleteListener(task -> frame.recycle());
     }
 
